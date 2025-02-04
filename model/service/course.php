@@ -39,6 +39,8 @@ require_once($CFG->dirroot.'/blocks/intelligent_learning/model/service/abstract.
 require_once($CFG->dirroot.'/course/lib.php');
 require_once($CFG->dirroot.'/course/format/lib.php');
 require_once("$CFG->dirroot/enrol/meta/locallib.php");
+require_once($CFG->dirroot.'/lib/gradelib.php');
+require_once($CFG->dirroot.'/grade/querylib.php');
 
 /**
  * Course Service Model
@@ -94,6 +96,10 @@ class blocks_intelligent_learning_model_service_course extends blocks_intelligen
         if(!empty($data['idnumber'])){
             if ($courseid = $DB->get_field('course', 'id', array('idnumber' => $data['idnumber']))) {
                 $course = course_get_format($courseid)->get_course();
+                // Validate if the course object is valid
+                if (empty($course->idnumber) || empty($course->id)) {
+                    $course = false; // invalidate the course
+                }
             }
         }
 
@@ -120,8 +126,23 @@ class blocks_intelligent_learning_model_service_course extends blocks_intelligen
             case 'remove':
             case 'delete':
             case 'drop':
-                if ($course and !@delete_course($course, false)) {
-                    throw new Exception("Failed to delete course (idnumber = $course->idnumber)");
+                if ($course) {
+                     /*
+                        If a crosslist is getting deleted then make the child section visible
+                        and then delete the crosslist, the crosslist has a enrol status of meta in enrol table for child section mapping to the parent crosslist course
+                    */
+                    $courseRecord = $DB->get_record('course', array('idnumber' => $course->idnumber), '*', MUST_EXIST);
+                    $childSections = $DB->get_records('enrol', array('enrol' => 'meta', 'courseid' => $courseRecord->id), null, '*');
+                    foreach ($childSections as $childSection) {
+                        $sectionRecord = $DB->get_record('course', array('id' => $childSection->customint1), '*', MUST_EXIST);
+                        $sectionRecord->visible = true;
+                        $DB->update_record('course', $sectionRecord);
+                    }
+                    if (!@delete_course($course, false)) {
+                        throw new Exception("Failed to delete course (idnumber = $course->idnumber)");
+                    }
+                } else {
+                    throw new Exception('Course does not exist, cannot proceed with delete operation.');
                 }
                 break;
             default:
@@ -236,8 +257,13 @@ class blocks_intelligent_learning_model_service_course extends blocks_intelligen
                
                 $userId = '';
                 $user = [];
-                foreach($records as $record){
+                $courseCategoryId = $course["categoryid"];
+                //sets exceededCategoryCutoff field in course if it exceeds the cutoff time
+                if ($this->exceededCategoryGradeCutOff($courseCategoryId)) {
+                    $course["exceededCategoryCutoff"] = true;
+                }
                 
+                foreach($records as $record) {
                     $userId = $record->userid;
                     $roles = [];
                     $userRoles = get_user_roles($context, $userId, true);
@@ -251,10 +277,16 @@ class blocks_intelligent_learning_model_service_course extends blocks_intelligen
                     }
 
                     $grade = $this->getGradeDetails($gradeRecords, $record->userid);
+                    $gradeitem = grade_item::fetch_course_item($id);                    
+                    $currentgrade_realletter = grade_format_gradevalue($grade->finalgrade, $gradeitem, true, GRADE_DISPLAY_TYPE_REAL_LETTER);
+                    $currentgrade_letter = grade_format_gradevalue($grade->finalgrade, $gradeitem, true, GRADE_DISPLAY_TYPE_LETTER);
+
                     $grades = array(
                         "courseid" => $grade->courseid,
                         "grade" => $grade->finalgrade,
-                        "rawgrade" => $grade->rawgrade
+                        "rawgrade" => $grade->rawgrade,
+                        "currentgradeRealLetter" => $currentgrade_realletter,
+                        "currentgradeLetter" => $currentgrade_letter
                     );
 
                     $user[] =array( "user" => array(
@@ -279,6 +311,23 @@ class blocks_intelligent_learning_model_service_course extends blocks_intelligen
             throw new Exception( $e->getMessage());
         }
     }
+
+     /**
+	 * @param courseCategoryId The course categoryId present in mdl_course_categories
+     * returns boolean if the time exceeds the cutoff time
+	 */
+   public function exceededCategoryGradeCutOff($courseCategoryId) {
+        $config = get_config('blocks/intelligent_learning', 'categorycutoff');
+        $categoryArr = [];
+        if (!empty($config)) {
+            parse_str($config, $categoryArr);
+            if (array_key_exists($courseCategoryId, $categoryArr)) {
+                return (time() > $categoryArr[$courseCategoryId]);
+            }
+        }
+    
+        return false;
+   }
 
     private function getGradeDetails($allGrades, $userId){
         foreach($allGrades as $grade){
@@ -307,7 +356,7 @@ class blocks_intelligent_learning_model_service_course extends blocks_intelligen
         $course   = (object) $course;
         $defaults = array(
             'startdate'      => time() + 3600 * 24,
-            'summary'        => get_string('defaultcoursesummary'),
+            'summary'        => '',
             'format'         => 'weeks',
             'guest'          => 0,
             'numsections'	 => 10,
@@ -383,7 +432,7 @@ class blocks_intelligent_learning_model_service_course extends blocks_intelligen
             // Create a default section.
             course_create_sections_if_missing($course, 0);
 
-            blocks_add_default_course_blocks($course);
+           // blocks_add_default_course_blocks($course); causes duplicate blocks
         } catch (dml_exception $e) {
             throw new Exception("Failed to get course object from database id = $courseid");
         }
@@ -409,11 +458,24 @@ class blocks_intelligent_learning_model_service_course extends blocks_intelligen
 
         $update = false;
         $record = new stdClass;
+        $modifySectionVisibility = get_config('blocks/intelligent_learning', 'modifysectionvisibility');
+        $modifyCrosslistvisibility = get_config('blocks/intelligent_learning', 'modifycrosslistvisibility');
+
+        //If the toggle Modify Section Visibility is No for section change-request then we delete the visible field from changeRequest($data)
+        if (!isset($data["children"]) && $modifySectionVisibility == '0') {
+            unset($data["visible"]); 
+        }
+
+        //If the toggle Modify Crosslist Visibility is No for crosslist change-request then we delete the visible field from changeRequest($data)
+        if (isset($data["children"]) && $modifyCrosslistvisibility == '0') {
+            unset($data["visible"]); 
+        }
+
         foreach ($data as $key => $value) {
             if (!in_array($key, $this->coursefields)) {
                 continue;
             }
-            if ($key != 'id' and $key != 'visible' and isset($course->$key) and $course->$key != $value) {
+            if ($key != 'id' and isset($course->$key) and $course->$key != $value) {
                 switch ($key) {
                     case 'idnumber':
                     case 'shortname':
@@ -582,6 +644,10 @@ class blocks_intelligent_learning_model_service_course extends blocks_intelligen
                     foreach ($currentchildren as $checkchild) {
                         if (!in_array($checkchild->customint1, $requestchildren)) {
                             // This child is not in the current list; remove the meta link.
+                            //take the uncrosslistedChildSection and set its visibile field to true and update the record
+                            $uncrosslistedChildSection = $DB->get_record('course', array('id' => $checkchild->customint1), '*', MUST_EXIST);
+                            $uncrosslistedChildSection->visible = true;
+                            $DB->update_record('course', $uncrosslistedChildSection);
                             $eid = $enrol->delete_instance($checkchild);
                         }
                     }

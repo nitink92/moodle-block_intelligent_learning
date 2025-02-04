@@ -80,9 +80,10 @@ class block_intelligent_learning extends block_list {
         $retentionlink     = $config->retentionalertlink;
         $stgradebookpid    = $config->stgradebookpid;
         $attendancelink    = $config->dailyattendancelink;
+        $midtermgradecolumns = $config->midtermgradecolumns;
 
         // Check to make sure the settings have been set.
-        if (empty($ilpurl) or empty($attendancepid) or empty($retentionalertpid) or empty($stgradebookpid)) {
+        if (empty($ilpurl)) {
             $this->content->items[] = html_writer::tag('span', get_string('needsadminsetup', 'block_intelligent_learning'), array('class' => 'error'));
             if (has_capability('moodle/site:config', context_system::instance())) {
                 $this->content->items[] = html_writer::link("$CFG->wwwroot/admin/settings.php?section=blocksettingintelligent_learning", get_string('configure', 'block_intelligent_learning'));
@@ -111,8 +112,10 @@ class block_intelligent_learning extends block_list {
             $gradebookapp = $config->gradebookapp;
             if ($gradebookapp == 'moodle') {
                 if ($helper->gradeperiod()) {
-                    $midtermgradelink = get_string('midtermgrades', 'block_intelligent_learning');
-                    $this->content->items[] = html_writer::link("$CFG->wwwroot/blocks/intelligent_learning/view.php?controller=midtermgrades&action=edit&courseid=$COURSE->id", $midtermgradelink, array('title' => $midtermgradelink));
+                    if ($midtermgradecolumns > 0) {
+                        $midtermgradelink = get_string('midtermgrades', 'block_intelligent_learning');
+                        $this->content->items[] = html_writer::link("$CFG->wwwroot/blocks/intelligent_learning/view.php?controller=midtermgrades&action=edit&courseid=$COURSE->id", $midtermgradelink, array('title' => $midtermgradelink));
+                    }
 
                     $finalgradelink = get_string('finalgrades', 'block_intelligent_learning');
                     $this->content->items[] = html_writer::link("$CFG->wwwroot/blocks/intelligent_learning/view.php?controller=finalgrades&action=edit&courseid=$COURSE->id", $finalgradelink, array('title' => $finalgradelink));

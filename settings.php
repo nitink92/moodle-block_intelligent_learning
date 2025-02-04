@@ -80,6 +80,22 @@ if ($ADMIN->fulltree) {
     );
 
     $configs[] = new admin_setting_configselect(
+        'modifysectionvisibility',
+        new lang_string('modifysectionvisibility', 'block_intelligent_learning'),
+        new lang_string('modifysectionvisibilitydesc', 'block_intelligent_learning'),
+        0,
+        $yesnooptions
+    );
+
+    $configs[] = new admin_setting_configselect(
+        'modifycrosslistvisibility',
+        new lang_string('modifycrosslistvisibility', 'block_intelligent_learning'),
+        new lang_string('modifycrosslistvisibilitydesc', 'block_intelligent_learning'),
+        0,
+        $yesnooptions
+    );
+
+    $configs[] = new admin_setting_configselect(
         'showlastattendance',
         new lang_string('showlastattendance', 'block_intelligent_learning'),
         new lang_string('showlastattendancedesc', 'block_intelligent_learning'),
@@ -115,7 +131,7 @@ if ($ADMIN->fulltree) {
         $helper->date->get_formats()
     );
     /*
-     * Category grade cutoff
+     * Category grade cutoff*/
      
     $configs[] = new admin_setting_intelligent_learning_catdate(
         'categorycutoff',
@@ -123,9 +139,10 @@ if ($ADMIN->fulltree) {
         new lang_string('categorycutoffdesc', 'block_intelligent_learning'),
         ''
     );
-    */
+
 
     $options   = array(
+        0 => '0',
         1 => '1',
         2 => '2',
         3 => '3',
@@ -134,8 +151,7 @@ if ($ADMIN->fulltree) {
         6 => '6'
     );
 
-    /*
-    * Midterm Grades
+
     $configs[] = new admin_setting_configselect(
         'midtermgradecolumns',
         new lang_string('midtermgradecolumns', 'block_intelligent_learning'),
@@ -143,7 +159,6 @@ if ($ADMIN->fulltree) {
         1,
         $options
     );
-    */
 
      $configs[] = new admin_setting_configselect(
         'gradevalidatelocalgradescheme',

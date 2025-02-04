@@ -196,15 +196,6 @@ class blocks_intelligent_learning_model_service_user extends blocks_intelligent_
                      WHERE l.deadline < ?
                        AND g.id IS NULL
                      UNION ALL
-                    SELECT cm.id AS cmid, m.name AS type, m.name AS module, a.name, a.intro AS descriptionhtml, a.timedue AS duedate, cm.visible, c.id AS contextid
-                      FROM {assignment} a
-                INNER JOIN {course_modules} cm ON cm.instance = a.id AND cm.course = ?
-                INNER JOIN {modules} m ON cm.module = m.id AND m.name = 'assignment'
-                INNER JOIN {context} c ON c.instanceid = cm.id AND c.contextlevel = ?
-           LEFT OUTER JOIN {assignment_submissions} s ON a.id = s.assignment AND s.userid = ?
-                     WHERE a.timedue < ?
-                       AND s.id IS NULL
-                     UNION ALL
                     SELECT cm.id AS cmid, 'assignment' AS type, m.name AS module, a.name, a.intro AS descriptionhtml, a.duedate, cm.visible, c.id AS contextid
                       FROM {assign} a
                 INNER JOIN {course_modules} cm ON cm.instance = a.id AND cm.course = ?
@@ -434,6 +425,11 @@ class blocks_intelligent_learning_model_service_user extends blocks_intelligent_
                     $user = $this->add($data);
                 }
                 break;
+             case 'updatePronoun':
+                if ($user) {
+                    $this->updatePronoun($user, $data);
+                }
+                break;
             case 'delete':
             case 'drop':
                 if ($user and !@delete_user($user)) {
@@ -535,6 +531,63 @@ class blocks_intelligent_learning_model_service_user extends blocks_intelligent_
             } catch (dml_exception $e) {
                 throw new Exception("Failed to update user with username = $user->username and id = $user->id");
             }
+        }
+    }
+
+    
+     /**
+     * Update a user with Pronoun data
+     *
+     * @param object $user Current user
+     * @param array $data New user data with Pronoun
+     * @return void
+     */
+    private function updatePronoun($user, $data) {
+        global $DB;
+        try {
+            $payload = new stdClass();
+            $payload->userid = $user->id;
+            $payload->data = $data['pronoun'];
+            //check if pronoun field exist or not
+            $record = $DB->get_record('user_info_field', array('shortname' => 'Pronouns'));
+            //get pronoun field id and user field id to insert/update
+            if ($record) {
+            $payload->fieldid = $record->id;
+            //check if the person record has pronoun or not
+            $userPronounData = $DB->get_record('user_info_data', array('userid' => $payload->userid, 'fieldid' => $payload->fieldid));
+                if ($userPronounData) {
+                    $payload->id = $userPronounData->id;
+                    $DB->update_record('user_info_data', $payload);
+                } else {
+                    $DB->insert_record('user_info_data', $payload);
+                }
+            } else {
+                //get default category data
+                $strdefaultcategory = get_string('profiledefaultcategory', 'admin');
+                $categorydata = $DB->get_record('user_info_category', ['name' => $strdefaultcategory]);
+                $catId = $categorydata->id;
+                $catSortOrder = $categorydata->sortorder;
+                // Create a new profile field for pronoun under default category.
+                $fieldData = new stdClass();
+                $fieldData->datatype = 'text';
+                $fieldData->shortname = 'Pronouns';
+                $fieldData->name = 'Pronouns';
+                $fieldData->description = '';
+                $fieldData->required = false;
+                $fieldData->locked = false;
+                $fieldData->forceunique = false;
+                $fieldData->signup = false;
+                $fieldData->visible = '2';
+                $fieldData->categoryid = $catId;
+                $fieldData->sortorder = $catSortOrder;
+                //insert pronoun field
+                $fieldPronoun = $DB->insert_record('user_info_field', $fieldData);
+                $payload->fieldid = $fieldPronoun;
+                //insert pronoun data for user
+                $DB->insert_record('user_info_data', $payload);
+            }
+        } catch (Exception $e) {
+            throw new Exception("Failed to update user with username = $user->username and id = $user->id");
         }
     }
     
@@ -643,7 +696,7 @@ private function get_upcoming_calendar($courses, $groups, $users, $daysinfuture,
     *
     * @return array
     */
-    public function get_user_activities($studentIds, $startDate = null, $endDate = null) {
+    public function get_user_activities($studentIds, $startDate = null, $endDate = null, $maxdays = null) {
 
         global $DB;
         
@@ -671,7 +724,7 @@ private function get_upcoming_calendar($courses, $groups, $users, $daysinfuture,
     
             $user = $DB->get_record_sql($sql, $sql_param);
             if (!empty ($user)) {
-            $sections = $this->helper->connector->get_courses($user, "");
+            $sections = $this->helper->connector->get_courses($user, "", $maxdays);
             //die(var_export($sections, false));
             foreach ($sections as $section){
             if(!empty($section->idnumber)){
